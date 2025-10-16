@@ -360,7 +360,7 @@
     </div>
 
     <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
         let resumeText = '';
         let jdText = '';
@@ -439,7 +439,8 @@
             for (let i = 1; i <= pdf.numPages; i++) {
                 const page = await pdf.getPage(i);
                 const content = await page.getTextContent();
-                text += content.items.map(item => item.str).join(' ') + '\n';
+                const pageText = content.items.map(item => item.str).join(' ');
+                text += pageText + '\n';
             }
             return text;
         }
@@ -470,10 +471,11 @@
                 issues: [],
                 keywords: { matched: [], missing: [] },
                 weakBullets: [],
-                formatIssues: []
+                formatIssues: [],
+                bulletStats: { total: 0, withMetrics: 0 }
             };
 
-            // Keyword Analysis
+            // KEYWORD ANALYSIS (Most Important)
             const jdKeywords = extractKeywords(jdText);
             const resumeKeywords = extractKeywords(resumeText);
             const resumeSet = new Set(resumeKeywords.map(k => k[0]));
@@ -484,60 +486,97 @@
             const keywordScore = jdKeywords.length > 0 ? Math.round((result.keywords.matched.length / jdKeywords.length) * 100) : 0;
             result.scores.keywords = keywordScore;
 
-            // Format Issues
-            if (resumeText.includes('\t') || /\|{2,}/.test(resumeText)) {
-                result.formatIssues.push('Tables or columns detected - ATS cannot parse these');
-            }
-            if (resumeText.match(/[★☆♦◆●◇■□▪▫]/g)?.length > 5) {
-                result.formatIssues.push('Special bullet characters may not parse correctly');
-            }
-            if (resumeText.split('\n').filter(l => l.trim()).length < 15) {
-                result.formatIssues.push('Poor line structure - add more line breaks');
-            }
-
-            result.scores.formatting = result.formatIssues.length === 0 ? 100 : Math.max(0, 100 - (result.formatIssues.length * 20));
-
-            // Section Detection
+            // SECTION DETECTION
             const sections = {
-                contact: /@|phone|\d{3}/.test(resumeText),
-                summary: /summary|objective/i.test(resumeText),
-                experience: /experience|employment/i.test(resumeText),
-                education: /education|degree/i.test(resumeText),
-                skills: /skills|technical/i.test(resumeText)
+                contact: /@|email|phone|\d{3}[-\s]?\d{3}[-\s]?\d{4}/.test(resumeText),
+                summary: /summary|objective|profile|about/i.test(resumeText),
+                experience: /experience|employment|work history|professional background/i.test(resumeText),
+                education: /education|degree|university|college|bachelor|master/i.test(resumeText),
+                skills: /skills|technical skills|competencies|proficiencies/i.test(resumeText)
             };
 
+            const missingSections = [];
             Object.entries(sections).forEach(([name, present]) => {
-                if (!present) result.issues.push(`Missing ${name} section`);
+                if (!present) {
+                    missingSections.push(`Missing or unclear ${name.charAt(0).toUpperCase() + name.slice(1)} section`);
+                }
             });
+
+            if (missingSections.length > 0) {
+                result.issues.push(...missingSections);
+            }
 
             const sectionsFound = Object.values(sections).filter(v => v).length;
             result.scores.structure = Math.round((sectionsFound / 5) * 100);
 
-            // Achievements
-            const bullets = resumeText.split('\n').filter(l => l.trim().match(/^[•\-\*●]/));
-            const quantified = bullets.filter(l => /\d/.test(l));
-            const percentage = bullets.length > 0 ? Math.round((quantified.length / bullets.length) * 100) : 0;
-
-            result.scores.quantified = percentage;
-
-            bullets.filter(l => !/\d/.test(l)).slice(0, 5).forEach(bullet => {
-                result.weakBullets.push(bullet.replace(/^[•\-\*●]\s*/, ''));
+            // BULLET POINT & METRICS ANALYSIS (FIXED)
+            const lines = resumeText.split('\n').map(l => l.trim()).filter(l => l);
+            
+            // Detect bullets more broadly - look for lines that start with bullet indicators OR are indented
+            const bullets = lines.filter(line => {
+                // Check if line starts with common bullet indicators
+                if (/^[•\-\*●○◦▪▫·‣⁃→➔➢➣➤➥➦➧➨➩]\s/.test(line)) return true;
+                // Check if line looks like a bullet (short, action-oriented)
+                if (line.match(/^(Led|Managed|Developed|Created|Implemented|Improved|Increased|Decreased|Built|Designed|Launched|Achieved|Delivered|Coordinated|Established|Executed|Optimized|Spearheaded|Reduced|Generated|Drove|Directed)/i)) return true;
+                // Check if line has numbers and action verbs (likely a bullet)
+                if (/\d+/.test(line) && /ed\b|ing\b/i.test(line) && line.length < 200) return true;
+                return false;
             });
 
-            if (percentage < 50) {
-                result.issues.push(`Only ${percentage}% of bullets have metrics - aim for 70%+`);
+            result.bulletStats.total = bullets.length;
+
+            // Detect metrics: numbers, percentages, dollar amounts, time periods
+            const metricsPattern = /\d+[%$KkMm]?|\d+\s*(percent|years?|months?|weeks?|days?|hours?|times?|x|people|employees|clients|customers|users|projects?|million|thousand|billion)|\$\d+|[\d,]+\+?/i;
+            
+            const bulletsWithMetrics = bullets.filter(bullet => metricsPattern.test(bullet));
+            result.bulletStats.withMetrics = bulletsWithMetrics.length;
+
+            const quantifiedPercent = bullets.length > 0 ? Math.round((bulletsWithMetrics.length / bullets.length) * 100) : 0;
+            result.scores.quantified = quantifiedPercent;
+
+            // Identify weak bullets (no metrics)
+            const bulletsWithoutMetrics = bullets.filter(bullet => !metricsPattern.test(bullet));
+            result.weakBullets = bulletsWithoutMetrics.slice(0, 5);
+
+            if (quantifiedPercent < 50 && bullets.length > 0) {
+                result.issues.push(`Only ${quantifiedPercent}% of your accomplishment bullets include metrics - aim for 70%+`);
             }
 
-            // Missing Keywords
-            if (result.keywords.missing.length > 5) {
-                result.issues.push(`Missing ${result.keywords.missing.length} critical keywords from job description`);
+            // FORMAT ISSUES (Only Real Problems)
+            // Check for actual ATS-breaking elements, not just plain text issues
+            const hasComplexTables = /\|{3,}/.test(resumeText) || (resumeText.match(/\|/g) || []).length > 10;
+            const hasProblematicChars = (resumeText.match(/[★☆♦◆■□▪▫]/g) || []).length > 10;
+            
+            if (hasComplexTables) {
+                result.formatIssues.push('Complex tables detected - ATS systems struggle with these');
+            }
+            if (hasProblematicChars) {
+                result.formatIssues.push('Excessive special characters may cause parsing issues');
+            }
+            if (resumeText.length < 250) {
+                result.formatIssues.push('Resume is too brief - add more detail about your experience');
+            }
+            if (!/@/.test(resumeText)) {
+                result.formatIssues.push('Email address not detected');
+            }
+            if (!/\d{3}[-\s]?\d{3}[-\s]?\d{4}/.test(resumeText)) {
+                result.formatIssues.push('Phone number not detected');
             }
 
-            // Overall Score
+            result.scores.formatting = result.formatIssues.length === 0 ? 100 : Math.max(60, 100 - (result.formatIssues.length * 15));
+
+            // MISSING KEYWORDS
+            if (result.keywords.missing.length > 10) {
+                result.issues.push(`Missing ${result.keywords.missing.length} important keywords from job description`);
+            } else if (result.keywords.missing.length > 5) {
+                result.issues.push(`Missing ${result.keywords.missing.length} keywords - add these naturally to improve match`);
+            }
+
+            // OVERALL SCORE (Weighted)
             result.scores.overall = Math.round(
-                (result.scores.formatting * 0.25) +
+                (result.scores.formatting * 0.20) +
                 (result.scores.structure * 0.20) +
-                (result.scores.keywords * 0.35) +
+                (result.scores.keywords * 0.40) +  // Keywords are most important
                 (result.scores.quantified * 0.20)
             );
 
@@ -545,15 +584,28 @@
         }
 
         function extractKeywords(text) {
-            const stopWords = ['the', 'and', 'for', 'with', 'from', 'have', 'this', 'that', 'will', 'been', 'your', 'their', 'into', 'about', 'would', 'there', 'could', 'should'];
+            const stopWords = new Set([
+                'the', 'and', 'for', 'with', 'from', 'have', 'this', 'that', 'will', 'been', 
+                'your', 'their', 'into', 'about', 'would', 'there', 'could', 'should', 'other',
+                'which', 'when', 'where', 'they', 'what', 'than', 'then', 'these', 'those',
+                'some', 'such', 'only', 'also', 'more', 'very', 'must', 'well', 'back', 'through',
+                'year', 'years', 'work', 'including', 'within', 'across', 'being'
+            ]);
+
             const words = text.toLowerCase()
                 .replace(/[^\w\s]/g, ' ')
                 .split(/\s+/)
-                .filter(w => w.length > 3 && !stopWords.includes(w));
+                .filter(w => w.length > 3 && !stopWords.has(w));
 
             const freq = {};
-            words.forEach(w => freq[w] = (freq[w] || 0) + 1);
-            return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 40);
+            words.forEach(w => {
+                freq[w] = (freq[w] || 0) + 1;
+            });
+
+            // Return top keywords
+            return Object.entries(freq)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 50);
         }
 
         function displayResults() {
@@ -574,7 +626,7 @@
                         </div>
                         <div class="score-card ${getClass(analysis.scores.quantified)}">
                             <div class="score-number ${getClass(analysis.scores.quantified)}">${analysis.scores.quantified}%</div>
-                            <div class="score-label">Quantified</div>
+                            <div class="score-label">Quantified (${analysis.bulletStats.withMetrics}/${analysis.bulletStats.total})</div>
                         </div>
                         <div class="score-card ${getClass(analysis.scores.structure)}">
                             <div class="score-number ${getClass(analysis.scores.structure)}">${analysis.scores.structure}%</div>
@@ -584,16 +636,20 @@
 
                     ${analysis.issues.length > 0 ? `
                     <div class="issue-list">
-                        <h3>⚠️ Issues Found (${analysis.issues.length})</h3>
+                        <h3>⚠️ Priority Issues (${analysis.issues.length})</h3>
                         <ul>
                             ${analysis.issues.map(issue => `<li>• ${issue}</li>`).join('')}
                         </ul>
                     </div>
-                    ` : ''}
+                    ` : `
+                    <div class="info-box" style="background: #f0fdf4; border-color: #22c55e;">
+                        <p style="color: #166534;"><strong>✅ Great! No major issues detected.</strong></p>
+                    </div>
+                    `}
 
                     ${analysis.formatIssues.length > 0 ? `
                     <div class="issue-list">
-                        <h3>📝 Formatting Issues (${analysis.formatIssues.length})</h3>
+                        <h3>📝 Formatting Suggestions (${analysis.formatIssues.length})</h3>
                         <ul>
                             ${analysis.formatIssues.map(issue => `<li>• ${issue}</li>`).join('')}
                         </ul>
@@ -604,15 +660,16 @@
                         <div class="keyword-box matched">
                             <h4>✅ Matched Keywords (${analysis.keywords.matched.length})</h4>
                             <div class="keyword-tags">
-                                ${analysis.keywords.matched.slice(0, 15).map(kw => 
+                                ${analysis.keywords.matched.slice(0, 20).map(kw => 
                                     `<span class="keyword-tag matched">${kw}</span>`
                                 ).join('')}
+                                ${analysis.keywords.matched.length > 20 ? `<span class="keyword-tag matched">+${analysis.keywords.matched.length - 20} more</span>` : ''}
                             </div>
                         </div>
                         <div class="keyword-box missing">
-                            <h4>❌ Missing Keywords (${analysis.keywords.missing.length})</h4>
+                            <h4>❌ Missing from Resume (${analysis.keywords.missing.length})</h4>
                             <div class="keyword-tags">
-                                ${analysis.keywords.missing.slice(0, 15).map(kw => 
+                                ${analysis.keywords.missing.slice(0, 20).map(kw => 
                                     `<span class="keyword-tag missing">${kw}</span>`
                                 ).join('')}
                             </div>
@@ -621,9 +678,9 @@
 
                     ${analysis.weakBullets.length > 0 ? `
                     <div class="issue-list">
-                        <h3>💪 Weak Bullets (Need Quantification)</h3>
+                        <h3>💪 Bullets That Need Metrics (${analysis.weakBullets.length} shown)</h3>
                         <ul>
-                            ${analysis.weakBullets.map(bullet => `<li>• ${bullet}</li>`).join('')}
+                            ${analysis.weakBullets.map(bullet => `<li>• ${bullet.substring(0, 150)}${bullet.length > 150 ? '...' : ''}</li>`).join('')}
                         </ul>
                     </div>
                     ` : ''}
@@ -636,85 +693,91 @@
         }
 
         function generatePrompts() {
-            const resumeOptPrompt = `You are an expert ATS resume optimizer. Analyze and rewrite this resume to pass ATS systems and match the job description perfectly.
+            const resumeOptPrompt = `You are an expert ATS resume optimizer. Rewrite this resume to maximize ATS compatibility and match the job description.
 
-RESUME:
+CURRENT RESUME:
 ${resumeText}
 
-JOB DESCRIPTION:
+TARGET JOB DESCRIPTION:
 ${jdText}
 
 ANALYSIS RESULTS:
 - Overall ATS Score: ${analysis.scores.overall}/100
-- Keyword Match: ${analysis.scores.keywords}%
-- Quantified Bullets: ${analysis.scores.quantified}%
-- Structure Score: ${analysis.scores.structure}%
+- Keyword Match: ${analysis.scores.keywords}% (${analysis.keywords.matched.length} matched, ${analysis.keywords.missing.length} missing)
+- Quantified Bullets: ${analysis.scores.quantified}% (${analysis.bulletStats.withMetrics} of ${analysis.bulletStats.total} have metrics)
+- Structure: ${analysis.scores.structure}%
 
-ISSUES FOUND:
-${analysis.issues.map(i => `- ${i}`).join('\n')}
+CRITICAL ISSUES TO FIX:
+${analysis.issues.length > 0 ? analysis.issues.map(i => `• ${i}`).join('\n') : '• No critical issues - focus on optimization'}
 
-FORMATTING PROBLEMS:
-${analysis.formatIssues.map(i => `- ${i}`).join('\n')}
+${analysis.formatIssues.length > 0 ? `FORMATTING SUGGESTIONS:
+${analysis.formatIssues.map(i => `• ${i}`).join('\n')}` : ''}
 
-MISSING KEYWORDS (must include naturally):
-${analysis.keywords.missing.join(', ')}
+MUST ADD THESE KEYWORDS (naturally integrate them):
+${analysis.keywords.missing.slice(0, 15).join(', ')}
 
-WEAK BULLETS NEEDING METRICS:
-${analysis.weakBullets.map(b => `- ${b}`).join('\n')}
+${analysis.weakBullets.length > 0 ? `BULLETS NEEDING QUANTIFICATION:
+${analysis.weakBullets.map(b => `• ${b}`).join('\n')}` : ''}
 
-INSTRUCTIONS:
-1. Rewrite the resume to include ALL missing keywords naturally
-2. Add quantifiable metrics (numbers, percentages, dollar amounts) to weak bullets
-3. Fix all formatting issues to be ATS-compliant (no tables, simple bullets, standard fonts)
-4. Ensure all required sections are present and well-structured
-5. Use strong action verbs (achieved, spearheaded, optimized, etc.)
-6. Keep the same job history and facts, just optimize the presentation
-7. Make it ATS-perfect while remaining authentic
+YOUR TASK:
+1. Rewrite the resume to include ALL missing keywords naturally in context
+2. Add specific metrics to bullets without them (percentages, numbers, dollar amounts, timeframes)
+3. Use strong action verbs (achieved, spearheaded, optimized, delivered, generated)
+4. Ensure clear section headers: EXPERIENCE, EDUCATION, SKILLS, SUMMARY
+5. Keep all facts accurate - only improve how they're presented
+6. Make it ATS-perfect: simple formatting, standard fonts, no tables/columns
+7. Optimize for the target job while keeping it authentic
 
-OUTPUT FORMAT:
-Provide the complete rewritten resume in clean, ATS-friendly format. Use simple formatting:
-- Standard section headers (EXPERIENCE, EDUCATION, SKILLS)
-- Simple bullet points (-)
-- Clear date formats (MM/YYYY)
-- No tables, columns, or special characters`;
+OUTPUT:
+Provide the complete rewritten resume. Use clean formatting:
+- Standard section headers in CAPS
+- Bullet points with hyphens (-)
+- Clear dates (MM/YYYY)
+- No special characters or complex formatting`;
 
-            const coverLetterPrompt = `You are an expert cover letter writer. Create a compelling, professional cover letter for this job application.
-
-RESUME SUMMARY:
-${resumeText.substring(0, 1000)}...
+            const coverLetterPrompt = `You are an expert cover letter writer. Create a compelling cover letter for this job application.
 
 JOB DESCRIPTION:
 ${jdText}
 
-TOP MATCHED SKILLS:
-${analysis.keywords.matched.slice(0, 10).join(', ')}
+CANDIDATE'S BACKGROUND (from resume):
+${resumeText.substring(0, 1500)}
 
-COVER LETTER STRUCTURE REQUIREMENTS:
-1. Opening Paragraph: Strong hook that captures attention and shows genuine interest in the role
-2. Second Paragraph: Why this specific role/company is the right fit for you
-3. Third Paragraph: 2-3 key accomplishments that demonstrate your value (with metrics when possible)
-4. Fourth Paragraph: Reference to resume for more details, and enthusiasm for next steps
-5. Closing: Gracious thank you
+KEY MATCHED SKILLS:
+${analysis.keywords.matched.slice(0, 15).join(', ')}
 
-TONE: Professional but captivating, confident but not arrogant, enthusiastic but not desperate
+COVER LETTER REQUIREMENTS:
 
-LENGTH: 3-4 short paragraphs, under 3/4 page
+STRUCTURE (4 paragraphs max):
+1. OPENING: Captivating hook that shows genuine enthusiasm and explains why this specific role/company excites you
+2. FIT: Why you're perfect for this role - connect your background to their needs
+3. ACHIEVEMENTS: 2-3 key accomplishments with metrics that demonstrate your value
+4. CLOSING: Reference resume, express enthusiasm, gracious thank you
 
-CLOSING: Must end with "I thank you immensely for your time and consideration."
+TONE: Professional but engaging, confident without arrogance, authentic enthusiasm
 
-OUTPUT: Complete, ready-to-use cover letter with proper formatting.`;
+CRITICAL RULES:
+- Under 3/4 page (350-400 words max)
+- MUST end with: "I thank you immensely for your time and consideration."
+- Include specific metrics from resume where possible
+- Reference the company/role specifically (not generic)
+- Complement resume - don't just repeat it
+
+OUTPUT:
+Complete, ready-to-send cover letter with proper business letter formatting.`;
 
             return `
                 <div class="card">
                     <div class="section-title">🤖 AI Optimization Prompts</div>
                     <div class="info-box">
-                        <p><strong>Copy these prompts and paste into Claude or ChatGPT to get optimized versions.</strong> Each prompt includes all your resume details, the job description, and specific issues to fix.</p>
+                        <p><strong>📋 Copy these prompts into Claude.ai or ChatGPT to get your optimized documents.</strong></p>
+                        <p style="margin-top: 8px;">Each prompt includes your full resume, the job description, and specific improvements needed based on the analysis above.</p>
                     </div>
 
                     <div class="prompt-box">
                         <div class="prompt-header">
                             <h3>📄 Resume Optimization Prompt</h3>
-                            <button class="copy-btn" onclick="copyPrompt('resume')">📋 Copy Prompt</button>
+                            <button class="copy-btn" onclick="copyPrompt('resume')">📋 Copy to Clipboard</button>
                         </div>
                         <div class="prompt-content" id="prompt-resume">${resumeOptPrompt}</div>
                     </div>
@@ -722,19 +785,20 @@ OUTPUT: Complete, ready-to-use cover letter with proper formatting.`;
                     <div class="prompt-box">
                         <div class="prompt-header">
                             <h3>✉️ Cover Letter Generation Prompt</h3>
-                            <button class="copy-btn" onclick="copyPrompt('cover')">📋 Copy Prompt</button>
+                            <button class="copy-btn" onclick="copyPrompt('cover')">📋 Copy to Clipboard</button>
                         </div>
                         <div class="prompt-content" id="prompt-cover">${coverLetterPrompt}</div>
                     </div>
 
                     <div class="info-box" style="background: #f0fdf4; border-color: #22c55e; margin-top: 20px;">
-                        <p><strong>💡 Next Steps:</strong></p>
-                        <ol style="margin-left: 20px; margin-top: 10px; color: #166534;">
-                            <li>Copy the Resume Optimization Prompt above</li>
-                            <li>Paste into Claude.ai or ChatGPT</li>
-                            <li>Get your optimized, ATS-perfect resume back</li>
-                            <li>Repeat with Cover Letter prompt</li>
-                            <li>Apply with confidence! 🚀</li>
+                        <p><strong>💡 How to Use:</strong></p>
+                        <ol style="margin-left: 20px; margin-top: 10px; color: #166534; line-height: 1.8;">
+                            <li>Click "Copy to Clipboard" on the Resume Optimization Prompt</li>
+                            <li>Go to <a href="https://claude.ai" target="_blank" style="color: #166534; font-weight: bold;">Claude.ai</a> or <a href="https://chat.openai.com" target="_blank" style="color: #166534; font-weight: bold;">ChatGPT</a></li>
+                            <li>Paste the prompt and submit</li>
+                            <li>Get your ATS-optimized resume back</li>
+                            <li>Repeat for cover letter</li>
+                            <li>Review, tweak if needed, and apply! 🚀</li>
                         </ol>
                     </div>
                 </div>
