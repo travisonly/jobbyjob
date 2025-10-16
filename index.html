@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jobbyjob - ATS Resume Scanner</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
@@ -57,6 +59,25 @@
         .input-header h2 {
             font-size: 20px;
             color: #333;
+        }
+        
+        .upload-btn {
+            background: #667eea;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        .upload-btn:hover {
+            background: #5568d3;
+        }
+        
+        input[type="file"] {
+            display: none;
         }
         
         textarea {
@@ -241,6 +262,13 @@
             border-color: #667eea;
         }
         
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+            font-weight: 600;
+        }
+        
         .hidden { display: none; }
     </style>
 </head>
@@ -248,6 +276,9 @@
     <div id="app"></div>
     
     <script>
+        // Set PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        
         const PASSWORD = 'jobbyjob2025';
         let isAuthenticated = localStorage.getItem('auth') === 'true';
         let resumeText = '';
@@ -297,8 +328,14 @@
                         <div class="card">
                             <div class="input-header">
                                 <h2>📄 Your Resume</h2>
+                                <label class="upload-btn">
+                                    📤 Upload File
+                                    <input type="file" id="resume-file" accept=".txt,.pdf,.doc,.docx">
+                                </label>
                             </div>
-                            <textarea id="resume" placeholder="Paste your resume text here...
+                            <textarea id="resume" placeholder="Paste your resume text here or upload a file...
+
+Supported formats: PDF, DOCX, TXT
 
 Tips:
 - Include all sections (Contact, Experience, Education, Skills)
@@ -313,8 +350,12 @@ Tips:
                         <div class="card">
                             <div class="input-header">
                                 <h2>🎯 Job Description</h2>
+                                <label class="upload-btn">
+                                    📤 Upload File
+                                    <input type="file" id="jd-file" accept=".txt,.pdf,.doc,.docx">
+                                </label>
                             </div>
-                            <textarea id="jd" placeholder="Paste the job description here (optional but recommended)...
+                            <textarea id="jd" placeholder="Paste the job description here or upload a file...
 
 Why add this?
 - Get keyword match percentage
@@ -339,7 +380,7 @@ Why add this?
                     </svg>
                     <h2 style="margin-bottom: 10px;">Ready to Optimize Your Resume</h2>
                     <p style="color: #666; max-width: 500px; margin: 0 auto;">
-                        Paste your resume above to get instant ATS feedback. Add a job description for keyword matching.
+                        Paste your resume or upload a file to get instant ATS feedback. Add a job description for keyword matching.
                     </p>
                 </div>
             `;
@@ -394,9 +435,74 @@ Why add this?
             }
         }
         
+        async function handleFileUpload(file, type) {
+            const fileType = file.name.split('.').pop().toLowerCase();
+            let text = '';
+            
+            const loadingMsg = document.createElement('div');
+            loadingMsg.className = 'loading';
+            loadingMsg.textContent = 'Reading file...';
+            document.getElementById('app').appendChild(loadingMsg);
+            
+            try {
+                if (fileType === 'pdf') {
+                    text = await extractTextFromPDF(file);
+                } else if (fileType === 'docx') {
+                    text = await extractTextFromDOCX(file);
+                } else if (fileType === 'txt') {
+                    text = await extractTextFromTXT(file);
+                } else {
+                    alert('Unsupported file type. Please use PDF, DOCX, or TXT.');
+                    loadingMsg.remove();
+                    return;
+                }
+                
+                if (type === 'resume') {
+                    resumeText = text;
+                } else {
+                    jobDescription = text;
+                }
+                
+                loadingMsg.remove();
+                render();
+                if (resumeText) analyze();
+                
+            } catch (error) {
+                alert('Error reading file: ' + error.message);
+                loadingMsg.remove();
+            }
+        }
+        
+        async function extractTextFromPDF(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            let text = '';
+            
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                const pageText = content.items.map(item => item.str).join(' ');
+                text += pageText + '\n';
+            }
+            
+            return text;
+        }
+        
+        async function extractTextFromDOCX(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const result = await mammoth.extractRawText({ arrayBuffer });
+            return result.value;
+        }
+        
+        async function extractTextFromTXT(file) {
+            return await file.text();
+        }
+        
         function attachListeners() {
             const resumeEl = document.getElementById('resume');
             const jdEl = document.getElementById('jd');
+            const resumeFileEl = document.getElementById('resume-file');
+            const jdFileEl = document.getElementById('jd-file');
             
             resumeEl.value = resumeText;
             jdEl.value = jobDescription;
@@ -411,6 +517,18 @@ Why add this?
                 jobDescription = e.target.value;
                 document.getElementById('jd-chars').textContent = jobDescription.length;
                 if (resumeText) analyze();
+            };
+            
+            resumeFileEl.onchange = (e) => {
+                if (e.target.files[0]) {
+                    handleFileUpload(e.target.files[0], 'resume');
+                }
+            };
+            
+            jdFileEl.onchange = (e) => {
+                if (e.target.files[0]) {
+                    handleFileUpload(e.target.files[0], 'jd');
+                }
             };
             
             updateCounts();
@@ -430,7 +548,6 @@ Why add this?
                 recommendations: []
             };
             
-            // Simple analysis
             const lines = resumeText.split('\n');
             const bullets = lines.filter(l => l.trim().match(/^[•\-\*]/));
             const withNumbers = bullets.filter(l => /\d/.test(l));
@@ -452,6 +569,10 @@ Why add this?
                 results.recommendations.push({ priority: 'high', text: 'Add a Work Experience section.' });
             }
             
+            if (!/@/.test(resumeText)) {
+                results.recommendations.push({ priority: 'high', text: 'Add your email address.' });
+            }
+            
             if (results.recommendations.length === 0) {
                 results.recommendations.push({ priority: 'success', text: 'Resume looks great! Minor tweaks may improve your score.' });
             }
@@ -461,7 +582,23 @@ Why add this?
         }
         
         function exportReport() {
-            alert('Your analysis has been processed! Export feature coming soon.');
+            const report = `JOBBYJOB ATS ANALYSIS REPORT
+Generated: ${new Date().toLocaleString()}
+
+OVERALL SCORE: ${analysis.overallScore}/100
+Quantified Bullets: ${analysis.achievements.percentage}%
+
+TOP RECOMMENDATIONS:
+${analysis.recommendations.map((r, i) => `${i+1}. [${r.priority.toUpperCase()}] ${r.text}`).join('\n')}
+`;
+            
+            const blob = new Blob([report], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `jobbyjob-report-${new Date().toISOString().split('T')[0]}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
         }
         
         render();
