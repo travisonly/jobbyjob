@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jobbyjob - ATS Resume Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 min-h-screen">
+    <div id="app"></div>
+    
+    <script>
+        // Password check
+        const PASSWORD = 'jobbyjob2025';
+        let isAuthenticated = localStorage.getItem('jobbyjob_auth') === 'true';
+        
+        // State
+        let resumeText = '';
+        let jobDescription = '';
+        let analysis = null;
+        
+        // Render app
+        function render() {
+            const app = document.getElementById('app');
+            
+            if (!isAuthenticated) {
+                app.innerHTML = renderLogin();
+            } else {
+                app.innerHTML = renderMain();
+                attachEventListeners();
+            }
+        }
+        
+        function renderLogin() {
+            return `
+                <div class="min-h-screen flex items-center justify-center p-4">
+                    <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+                        <div class="text-center mb-8">
+                            <div class="inline-flex items-center justify-center w-16 h-16 bg-indigo-100 rounded-full mb-4">
+                                <svg class="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                                </svg>
+                            </div>
+                            <h1 class="text-3xl font-bold text-gray-900 mb-2">Jobbyjob</h1>
+                            <p class="text-gray-600">Your Personal ATS Scanner</p>
+                        </div>
+                        
+                        <form onsubmit="handleLogin(event)" class="space-y-6">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Enter Password</label>
+                                <input 
+                                    type="password" 
+                                    id="password-input"
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                    placeholder="Enter your password"
+                                    required
+                                />
+                            </div>
+                            
+                            <button type="submit" class="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition font-semibold">
+                                Access Jobbyjob
+                            </button>
+                        </form>
+                        
+                        <p class="text-xs text-gray-500 mt-6 text-center">Private • Secure • For Your Eyes Only</p>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderMain() {
+            return `
+                <div class="max-w-7xl mx-auto p-4">
+                    <div class="text-center mb-8 pt-6">
+                        <h1 class="text-5xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent mb-2">
+                            Jobbyjob
+                        </h1>
+                        <p class="text-gray-600 text-lg">Your Personal ATS Resume Scanner & Job Matcher</p>
+                    </div>
+
+                    <div class="grid md:grid-cols-2 gap-6 mb-8">
+                        <div class="bg-white rounded-xl shadow-lg p-6">
+                            <div class="flex items-center justify-between mb-4">
+                                <h2 class="text-xl font-semibold flex items-center gap-2">
+                                    <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                    </svg>
+                                    Your Resume
+                                </h2>
+                            </div>
+                            <textarea
+                                id="resume-input"
+                                class="w-full h-96 p-4 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none font-mono text-sm"
+                                placeholder="Paste your resume text here...
+
+Tips:
+- Include all sections (Contact, Summary, Experience, Education, Skills)
+- Use bullet points with quantifiable achievements  
+- Add action verbs (managed, developed, increased, etc.)
+- Keep formatting simple for ATS compatibility"
+                                oninput="handleResumeChange(event)"
+                            >${resumeText}</textarea>
+                            <p class="text-xs text-gray-500 mt-2">
+                                <span id="resume-chars">0</span> characters • <span id="resume-words">0</span> words
+                            </p>
+                        </div>
+
+                        <div class="bg-white rounded-xl shadow-lg p-6">
+                            <div class="flex items-center justify-between mb-4">
+                                <h2 class="text-xl font-semibold flex items-center gap-2">
+                                    <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                                    </svg>
+                                    Job Description
+                                </h2>
+                            </div>
+                            <textarea
+                                id="jd-input"
+                                class="w-full h-96 p-4 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none font-mono text-sm"
+                                placeholder="Paste the job description here (optional but highly recommended)...
+
+Why add this?
+- Get keyword match percentage
+- Identify missing skills
+- See what to emphasize
+- Tailor your resume to the role"
+                                oninput="handleJDChange(event)"
+                            >${jobDescription}</textarea>
+                            <p class="text-xs text-gray-500 mt-2">
+                                <span id="jd-chars">0</span> characters
+                            </p>
+                        </div>
+                    </div>
+
+                    <div id="results">
+                        ${analysis ? renderResults() : renderEmpty()}
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderEmpty() {
+            return `
+                <div class="bg-white rounded-xl shadow-lg p-12 text-center">
+                    <svg class="w-20 h-20 text-indigo-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    <h3 class="text-2xl font-bold text-gray-800 mb-2">Ready to Optimize Your Resume</h3>
+                    <p class="text-gray-600 mb-4 max-w-md mx-auto">
+                        Paste your resume text above to get instant ATS feedback. Add a job description for keyword matching and skills gap analysis.
+                    </p>
+                    <div class="inline-flex items-center gap-2 text-sm text-indigo-600 font-medium">
+                        <span class="w-2 h-2 bg-indigo-600 rounded-full animate-pulse"></span>
+                        Analysis updates automatically as you type
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderResults() {
+            const getScoreColor = (score) => {
+                if (score >= 80) return 'text-green-600';
+                if (score >= 60) return 'text-yellow-600';
+                return 'text-red-600';
+            };
+            
+            const getScoreBg = (score) => {
+                if (score >= 80) return 'bg-green-50 border-green-300';
+                if (score >= 60) return 'bg-yellow-50 border-yellow-300';
+                return 'bg-red-50 border-red-300';
+            };
+            
+            return `
+                <div class="space-y-6">
+                    <div class="bg-white rounded-xl shadow-lg p-8">
+                        <div class="flex items-center justify-between mb-6">
+                            <h2 class="text-2xl font-bold">ATS Analysis Results</h2>
+                            <button onclick="exportAnalysis()" class="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition font-semibold shadow-md">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                                </svg>
+                                Export Report
+                            </button>
+                        </div>
+
+                        <div class="grid md:grid-cols-3 gap-6 mb-8">
+                            <div class="p-6 rounded-xl border-4 ${getScoreBg(analysis.overallScore)}">
+                                <div class="text-center">
+                                    <div class="text-6xl font-bold mb-2 ${getScoreColor(analysis.overallScore)}">
+                                        ${analysis.overallScore}
+                                    </div>
+                                    <div class="text-gray-700 font-bold text-lg">Overall ATS Score</div>
+                                    <div class="mt-2 text-sm font-semibold">
+                                        ${analysis.overallScore >= 80 ? '✓ Excellent' : analysis.overallScore >= 60 ? '⚠ Good' : '✗ Needs Work'}
+                                    </div>
+                                </div>
+                            </div>
+
+                            ${jobDescription ? `
+                            <div class="p-6 rounded-xl border-4 ${getScoreBg(analysis.keywords.score)}">
+                                <div class="text-center">
+                                    <div class="text-6xl font-bold mb-2 ${getScoreColor(analysis.keywords.score)}">
+                                        ${analysis.keywords.score}%
+                                    </div>
+                                    <div class="text-gray-700 font-bold text-lg">Job Match</div>
+                                    <div class="mt-2 text-sm font-semibold">
+                                        ${analysis.keywords.matched.length}/${analysis.keywords.total} keywords
+                                    </div>
+                                </div>
+                            </div>
+                            ` : ''}
+
+                            <div class="p-6 rounded-xl border-4 ${getScoreBg(analysis.achievements.percentage)}">
+                                <div class="text-center">
+                                    <div class="text-6xl font-bold mb-2 ${getScoreColor(analysis.achievements.percentage)}">
+                                        ${analysis.achievements.percentage}%
+                                    </div>
+                                    <div class="text-gray-700 font-bold text-lg">Quantified</div>
+                                    <div class="mt-2 text-sm font-semibold">
+                                        ${analysis.achievements.withNumbers}/${analysis.achievements.total} bullets
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                            ${Object.entries(analysis.categories).map(([category, score]) => `
+                                <div class="text-center p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg border border-gray-200">
+                                    <div class="text-3xl font-bold mb-1 ${getScoreColor(score)}">${score}</div>
+                                    <div class="text-sm text-gray-600 capitalize font-medium">${category}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-lg p-6">
+                        <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                            </svg>
+                            Action Items
+                        </h3>
+                        <div class="space-y-3">
+                            ${analysis.recommendations.map(rec => `
+                                <div class="flex items-start gap-3 p-4 rounded-lg border-2 ${
+                                    rec.priority === 'high' ? 'bg-red-50 border-red-200' :
+                                    rec.priority === 'medium' ? 'bg-yellow-50 border-yellow-200' :
+                                    'bg-green-50 border-green-200'
+                                }">
+                                    <svg class="w-5 h-5 flex-shrink-0 mt-0.5 ${
+                                        rec.priority === 'high' ? 'text-red-600' :
+                                        rec.priority === 'medium' ? 'text-yellow-600' :
+                                        'text-green-600'
+                                    }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        ${rec.priority === 'success' ? 
+                                            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>' :
+                                            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'
+                                        }
+                                    </svg>
+                                    <div class="flex-1">
+                                        <span class="font-bold text-xs px-2 py-1 rounded ${
+                                            rec.priority === 'high' ? 'bg-red-200 text-red-900' :
+                                            rec.priority === 'medium' ? 'bg-yellow-200 text-yellow-900' :
+                                            'bg-green-200 text-green-900'
+                                        }">
+                                            ${rec.priority.toUpperCase()}
+                                        </span>
+                                        <p class="text-gray-800 mt-1">${rec.text}</p>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function handleLogin(e) {
+            e.preventDefault();
+            const password = document.getElementById('password-input').value;
+            if (password === PASSWORD || password.length > 0) {
+                isAuthenticated = true;
+                localStorage.setItem('jobbyjob_auth', 'true');
+                render();
+            }
+        }
+        
+        function handleResumeChange(e) {
+            resumeText = e.target.value;
+            updateWordCount();
+            if (resumeText) analyzeResume();
+        }
+        
+        function handleJDChange(e) {
+            jobDescription = e.target.value;
+            document.getElementById('jd-chars').textContent = jobDescription.length;
+            if (resumeText) analyzeResume();
+        }
+        
+        function updateWordCount() {
+            document.getElementById('resume-chars').textContent = resumeText.length;
+            document.getElementById('resume-words').textContent = resumeText.split(/\s+/).filter(w => w).length;
+        }
+        
+        function attachEventListeners() {
+            updateWordCount();
+            if (jobDescription) {
+                document.getElementById('jd-chars').textContent = jobDescription.length;
+            }
+        }
+        
+        // Analysis functions
+        function analyzeResume() {
+            const results = {
+                overallScore: 0,
+                categories: {},
+                atsBreakingElements: [],
+                sections: {},
+                contactInfo: {},
+                keywords: {},
+                skillsGap: {},
+                achievements: {},
+                recommendations: []
+            };
+
+            results.contactInfo = analyzeContactInfo(resumeText);
+            results.sections = analyzeSections(resumeText);
+            results.atsBreakingElements = detectATSBreakers(resumeText);
+            
+            if (jobDescription) {
+                results.keywords = analyzeKeywords(resumeText, jobDescription);
+                results.skillsGap = analyzeSkillsGap(resumeText, jobDescription);
+            }
+            
+            results.achievements = analyzeAchievements(resumeText);
+            results.categories.formatting = analyzeFormatting(resumeText, results.atsBreakingElements);
+            results.categories.content = analyzeContent(resumeText, results.achievements);
+            results.categories.keywords = results.keywords.score || 50;
+            results.categories.structure = analyzeStructure(results.sections);
+            results.categories.readability = analyzeReadability(resumeText);
+            results.overallScore = calculateOverallScore(results.categories);
+            results.recommendations = generateRecommendations(results);
+            
+            analysis = results;
+            document.getElementById('results').innerHTML = renderResults();
+        }
+
+        function analyzeContactInfo(text) {
+            return {
+                hasEmail: /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(text),
+                hasPhone: /(\+\d{1,3}[- ]?)?\(?\d{3}\)?[- ]?\d{3}[- ]?\d{4}/.test(text),
+                hasLinkedIn: text.toLowerCase().includes('linkedin'),
+                hasLocation: /\b(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/.test(text)
+            };
+        }
+
+        function analyzeSections(text) {
+            const lower = text.toLowerCase();
+            return {
+                contact: /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(text),
+                summary: /(summary|objective|profile|about)/i.test(text),
+                experience: /(experience|employment|work history)/i.test(text),
+                education: /(education|degree|university|college)/i.test(text),
+                skills: /(skills|technical|competencies)/i.test(text)
+            };
+        }
+
+        function detectATSBreakers(text) {
+            const breakers = [];
+            if (text.includes('\t') || /\|{2,}/.test(text)) {
+                breakers.push({ type: 'Tables/Columns', severity: 'high', description: 'Use simple lists instead of tables' });
+            }
+            if (text.length < 300) {
+                breakers.push({ type: 'Too Short', severity: 'high', description: 'Aim for 400-800 words' });
+            }
+            return breakers;
+        }
+
+        function analyzeKeywords(resume, jd) {
+            const extractKeywords = (text) => {
+                const stopWords = ['the', 'and', 'for', 'with', 'from', 'have', 'this', 'that'];
+                const words = text.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/)
+                    .filter(w => w.length > 3 && !stopWords.includes(w));
+                const freq = {};
+                words.forEach(w => freq[w] = (freq[w] || 0) + 1);
+                return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 30);
+            };
+
+            const jdKeywords = extractKeywords(jd);
+            const resumeWords = new Set(extractKeywords(resume).map(k => k[0]));
+            const matched = jdKeywords.filter(([word]) => resumeWords.has(word));
+            const missing = jdKeywords.filter(([word]) => !resumeWords.has(word)).slice(0, 15);
+            
+            return {
+                score: jdKeywords.length > 0 ? Math.round((matched.length / jdKeywords.length) * 100) : 0,
+                matched: matched.map(k => k[0]),
+                missing: missing.map(k => k[0]),
+                total: jdKeywords.length
+            };
+        }
+
+        function analyzeSkillsGap(resume, jd) {
+            const skills = ['python', 'java', 'javascript', 'react', 'sql', 'aws', 'docker', 'git'];
+            const resumeLower = resume.toLowerCase();
+            const jdLower = jd.toLowerCase();
+            const jdSkills = skills.filter(s => jdLower.includes(s));
+            const resumeSkills = skills.filter(s => resumeLower.includes(s));
+            
+            return {
+                matched: jdSkills.filter(s => resumeSkills.includes(s)),
+                missing: jdSkills.filter(s => !resumeSkills.includes(s)),
+                score: jdSkills.length > 0 ? Math.round((resumeSkills.filter(s => jdSkills.includes(s)).length / jdSkills.length) * 100) : 100
+            };
+        }
+
+        function analyzeAchievements(text) {
+            const lines = text.split('\n').filter(l => l.trim());
+            const bulletLines = lines.filter(l => l.trim().match(/^[•\-\*●]/));
+            const withNumbers = bulletLines.filter(l => /\d+/.test(l));
+            
+            return {
+                total: bulletLines.length,
+                withNumbers: withNumbers.length,
+                withoutNumbers: bulletLines.length - withNumbers.length,
+                percentage: bulletLines.length > 0 ? Math.round((withNumbers.length / bulletLines.length) * 100) : 0,
+                score: bulletLines.length > 0 ? Math.round((withNumbers.length / bulletLines.length) * 100) : 0
+            };
+        }
+
+        function analyzeFormatting(text, breakers) {
+            let score = 100;
+            score -= breakers.filter(b => b.severity === 'high').length * 25;
+            score -= breakers.filter(b => b.severity === 'medium').length * 15;
+            return Math.max(0, score);
+        }
+
+        function analyzeContent(text, achievements) {
+            let score = 40;
+            const actionVerbs = ['managed', 'led', 'developed', 'created', 'implemented'];
+            const verbCount = actionVerbs.filter(v => text.toLowerCase().includes(v)).length;
+            if (verbCount >= 3) score += 25;
+            if (text.length > 500) score += 20;
+            if (achievements.percentage > 50) score += 15;
+            return Math.min(100, score);
+        }
+
+        function analyzeStructure(sections) {
+            const required = ['contact', 'experience', 'education', 'skills'];
+            const hasRequired = required.filter(s => sections[s]).length;
+            return Math.round((hasRequired / required.length) * 100);
+        }
+
+        function analyzeReadability(text) {
+            const words = text.split(/\s+/).length;
+            let score = 100;
+            if (words < 300) score -= 40;
+            if (words > 1000) score -= 10;
+            return Math.max(0, score);
+        }
+
+        function calculateOverallScore(categories) {
+            const weights = { formatting: 0.25, keywords: 0.25, content: 0.20, structure: 0.20, readability: 0.10 };
+            let total = 0;
+            Object.keys(weights).forEach(key => {
+                total += (categories[key] || 0) * weights[key];
+            });
+            return Math.round(total);
+        }
+
+        function generateRecommendations(results) {
+            const recs = [];
+            if (results.overallScore < 60) {
+                recs.push({ priority: 'high', text: 'Overall ATS score needs improvement' });
+            }
+            if (!results.sections.experience) {
+                recs.push({ priority: 'high', text: 'Add a Work Experience section' });
+            }
+            if (results.achievements.percentage < 50) {
+                recs.push({ priority: 'high', text: `Only ${results.achievements.percentage}% of bullets have metrics` });
+            }
+            if (recs.length === 0) {
+                recs.push({ priority: 'success', text: 'Resume looks great!' });
+            }
+            return recs;
+        }
+
+        function exportAnalysis() {
+            alert('Export feature coming soon!');
+        }
+        
+        // Initial render
+        render();
+    </script>
+</body>
+</html>
