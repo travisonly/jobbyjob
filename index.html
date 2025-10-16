@@ -1,12 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Jobbyjob Lite+ — ATS Analyzer & Prompt Launcher</title>
+  <title>Jobbyjob Lite+ — ATS Analyzer & Prompt Launcher (Local-Only)</title>
 
-  <!-- Lazy libs loaded on demand -->
-  <!-- html2pdf for Export -->
+  <!-- Export to PDF (client-side) -->
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
   <style>
@@ -40,6 +39,7 @@
     @media (max-width: 900px){.row{grid-template-columns:1fr}}
     .card{
       background:var(--card);
+      border:1px solid --border;
       border:1px solid var(--border);
       border-radius:16px;
       padding:16px;
@@ -104,6 +104,10 @@
     .progress{height:8px;background:#0b1227;border:1px solid #27304a;border-radius:999px;overflow:hidden}
     .progress > div{height:8px;background:linear-gradient(90deg,#4f46e5,#22c55e);width:0%}
     footer{margin:24px 0 8px;color:#64748b;font-size:12px;text-align:center}
+    .toast{
+      position:fixed;right:16px;bottom:16px;background:#052e17;color:#86efac;border:1px solid #14532d;
+      padding:10px 14px;border-radius:10px;font-weight:700;box-shadow:0 10px 30px rgba(0,0,0,.25);display:none
+    }
   </style>
 </head>
 <body>
@@ -172,8 +176,8 @@
         <div class="split">
           <button class="btn secondary" id="copyResumePrompt">Copy Resume Prompt</button>
           <button class="btn secondary" id="copyCoverPrompt">Copy Cover Prompt</button>
-          <button class="btn warn" id="openClaudeResume">Open in Claude (Resume)</button>
-          <button class="btn warn" id="openChatGPTResume">Open in ChatGPT (Resume)</button>
+          <button class="btn warn" id="openClaudeResume">Copy & Open Claude</button>
+          <button class="btn warn" id="openChatGPTResume">Copy & Open ChatGPT</button>
         </div>
       </div>
       <div class="grid2">
@@ -191,13 +195,16 @@
     <footer>Local-only. No servers, no tracking. Built to be fast & useful.</footer>
   </div>
 
+  <div id="toast" class="toast">Copied to clipboard</div>
+
   <script>
-    // ---------- State ----------
+    /* -------------------------
+       STATE & ELEMENTS
+    ------------------------- */
     let resumeText = localStorage.getItem('resumeText') || '';
     let jdText = localStorage.getItem('jdText') || '';
     let analysis = null;
 
-    // ---------- Elements ----------
     const resumeEl = document.getElementById('resume');
     const jdEl = document.getElementById('jd');
     const resumeCount = document.getElementById('resumeCount');
@@ -213,28 +220,28 @@
     const copyCoverPromptBtn = document.getElementById('copyCoverPrompt');
     const openClaudeResumeBtn = document.getElementById('openClaudeResume');
     const openChatGPTResumeBtn = document.getElementById('openChatGPTResume');
+    const toastEl = document.getElementById('toast');
 
-    // ---------- Init ----------
+    /* -------------------------
+       INIT
+    ------------------------- */
     resumeEl.value = resumeText;
     jdEl.value = jdText;
     updateCount(resumeText, resumeCount);
     updateCount(jdText, jdCount);
     enableAnalyze();
 
-    // Dark mode toggle (kept simple)
     document.getElementById('darkToggle').addEventListener('change', (e)=>{
       document.body.style.background = e.target.checked
         ? 'radial-gradient(1200px 800px at 10% 10%, #141a34 0%, #0b1020 50%, #090d1a 100%)'
         : '#f3f4f6';
     });
 
-    // Save on unload
     window.addEventListener('beforeunload', ()=>{
       localStorage.setItem('resumeText', resumeEl.value);
       localStorage.setItem('jdText', jdEl.value);
     });
 
-    // Text input handlers
     resumeEl.addEventListener('input', e => {
       resumeText = e.target.value;
       updateCount(resumeText, resumeCount);
@@ -246,10 +253,24 @@
       enableAnalyze();
     });
 
-    // Upload handlers (lazy-load parsers)
     document.getElementById('resumeFile').addEventListener('change', (e)=> handleFile(e, resumeEl, resumeCount));
     document.getElementById('jdFile').addEventListener('change', (e)=> handleFile(e, jdEl, jdCount));
 
+    function updateCount(text, el){
+      const words = (text.trim().match(/\b[\w'-]+\b/g) || []).length;
+      el.textContent = words;
+    }
+    function enableAnalyze(){
+      analyzeBtn.disabled = !(resumeEl.value.trim() && jdEl.value.trim());
+      reanalyzeBtn.disabled = !analysis;
+    }
+    function setProgress(pct){
+      progressFill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    }
+
+    /* -------------------------
+       FILE PARSERS (lazy)
+    ------------------------- */
     async function handleFile(e, targetTextarea, counterEl){
       const file = e.target.files[0];
       if(!file) return;
@@ -277,20 +298,6 @@
       }
     }
 
-    function setProgress(pct){
-      progressFill.style.width = Math.max(0, Math.min(100, pct)) + '%';
-    }
-
-    function updateCount(text, el){
-      const words = (text.trim().match(/\b[\w'-]+\b/g) || []).length;
-      el.textContent = words;
-    }
-    function enableAnalyze(){
-      analyzeBtn.disabled = !(resumeEl.value.trim() && jdEl.value.trim());
-      reanalyzeBtn.disabled = !analysis;
-    }
-
-    // Lazy loaders
     async function ensurePdfJs(){
       if(window.pdfjsLib) return;
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
@@ -324,12 +331,14 @@
       return result.value || '';
     }
 
-    // Analysis
+    /* -------------------------
+       ANALYSIS (ATS-style)
+    ------------------------- */
     analyzeBtn.addEventListener('click', analyze);
     reanalyzeBtn.addEventListener('click', analyze);
 
     function analyze(){
-      setProgress(10);
+      setProgress(12);
       setTimeout(()=>{
         analysis = performAnalysis(resumeEl.value, jdEl.value);
         renderResults(analysis);
@@ -337,43 +346,88 @@
         promptsCard.style.display = 'block';
         setProgress(0);
         enableAnalyze();
-      }, 100);
+      }, 60);
     }
 
-    // TF-like keyword extraction
-    const stopwords = new Set(("a,about,above,across,after,again,against,all,almost,alone,along,already,also,although,always,am,among,an,and,another,any,anyone,anything,are,around,as,at,be,became,because,become,been,before,being,below,between,both,but,by,can,could,did,do,does,doing,down,during,each,else,ever,every,for,from,further,had,has,have,having,he,her,here,hers,herself,him,himself,his,how,however,i,if,in,into,is,it,its,itself,just,least,less,like,may,me,might,more,most,mostly,my,myself,near,neither,no,nor,not,now,of,off,often,on,once,one,only,or,other,our,ours,ourselves,out,over,own,rather,really,same,she,should,since,so,some,someone,something,still,such,than,that,the,their,theirs,them,themselves,then,there,these,they,this,those,through,to,too,under,until,up,very,via,was,we,were,what,when,where,whether,which,while,who,whom,whose,why,will,with,within,without,would,you,your,yours,yourself,yourselves").split(','));
+    // Stopwords & filler ignored for keyword gap
+    const stopwords = new Set(("a,about,above,across,after,again,against,all,almost,alone,along,already,also,although,always,am,among,an,and,another,any,anyone,anything,are,around,as,at,be,because,been,before,being,below,between,both,but,by,can,could,did,do,does,doing,down,during,each,else,ever,every,for,from,further,had,has,have,having,he,her,here,hers,herself,him,himself,his,how,however,i,if,in,into,is,it,its,itself,just,least,less,like,may,me,might,more,most,mostly,my,myself,near,neither,no,nor,not,now,of,off,often,on,once,one,only,or,other,our,ours,ourselves,out,over,own,rather,really,same,she,should,since,so,some,someone,something,still,such,than,that,the,their,theirs,them,themselves,then,there,these,they,this,those,through,to,too,under,until,up,very,via,was,we,were,what,when,where,whether,which,while,who,whom,whose,why,will,with,within,without,would,you,your,yours,yourself,yourselves").split(','));
+    const filler = new Set(("join,environment,role,including,etc,information,world,work,where").split(','));
+
+    // Lightweight synonyms map (counts if any variant appears)
+    const synonyms = {
+      "program": ["program","programs","programs","programmatic","initiative","initiatives"],
+      "project": ["project","projects","pm","pmp","scrum","agile"],
+      "marketing": ["marketing","brand","promotion","go-to-market","campaign","communications"],
+      "communications": ["communications","comms","internal communications","external communications","PR","public relations"],
+      "entrepreneurship": ["entrepreneurship","entrepreneurs","founders","startups"],
+      "event": ["event","events","gala","conference","festival","logistics","cvent"],
+      "invoice": ["invoice","invoicing","billing","ap","accounts payable","receivables"],
+      "budget": ["budget","p&l","finance","financials","forecast"],
+      "sponsor": ["sponsor","sponsors","sponsorship"],
+      "database": ["crm","database","ux database","salesforce","hubspot","airtable"],
+      "eoy": ["eoy","entrepreneur of the year"],
+      "alumni": ["alumni","alumni programming"],
+      "women": ["winning women","ww"],
+      "ean": ["entrepreneurs access network","ean"]
+    };
 
     function tokenize(text){
-      return (text.toLowerCase().match(/\b[a-z][a-z+\-\/&]{2,}\b/g) || [])
-        .filter(w => !stopwords.has(w));
+      return (text.toLowerCase().match(/\b[a-z][a-z+\-\/&]{2,}\b/g) || []);
     }
 
-    function topKeywords(text, limit=40){
-      const tokens = tokenize(text);
+    function ngrams(tokens, n){
+      const grams = [];
+      for(let i=0;i<=tokens.length-n;i++){
+        grams.push(tokens.slice(i,i+n).join(' '));
+      }
+      return grams;
+    }
+
+    function topTerms(text, limit=35){
+      const tokens = tokenize(text).filter(w => !stopwords.has(w));
+      const grams = [...tokens, ...ngrams(tokens,2), ...ngrams(tokens,3)];
       const freq = {};
-      for(const t of tokens) freq[t] = (freq[t]||0)+1;
+      grams.forEach(t => {
+        if (t.length < 4) return;
+        // skip filler-only grams
+        const parts = t.split(' ');
+        if (parts.every(p => filler.has(p))) return;
+        freq[t] = (freq[t]||0)+1;
+      });
       return Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,limit).map(([k])=>k);
     }
 
-    function weightedMatch(jdTop, resumeTokens){
-      const rset = new Set(resumeTokens);
-      const matched = [];
-      const missing = [];
-      // JD terms more important at the top
-      jdTop.forEach((t, i)=>{
-        (rset.has(t) ? matched : missing).push(t);
-      });
-      const score = jdTop.length ? Math.round((matched.length / jdTop.length) * 100) : 0;
-      return { matched, missing, score };
+    function synonymHit(text){
+      const low = text.toLowerCase();
+      const hits = {};
+      for(const canon in synonyms){
+        hits[canon] = synonyms[canon].some(v => low.includes(v));
+      }
+      return hits;
+    }
+
+    function sectionize(text){
+      const lines = text.split(/\r?\n/);
+      const obj = { summary:'', skills:'', experience:'', education:'', certifications:'', other:'' };
+      let current = 'other';
+      for(const l of lines){
+        const t = l.trim().toLowerCase();
+        if(/^summary|objective|profile/.test(t)) current = 'summary';
+        else if(/^skills|competencies|proficiencies/.test(t)) current = 'skills';
+        else if(/^experience|employment|work history|professional experience/.test(t)) current = 'experience';
+        else if(/^education|academic/.test(t)) current = 'education';
+        else if(/^certifications?|licenses?/.test(t)) current = 'certifications';
+        obj[current] += l + '\n';
+      }
+      return obj;
     }
 
     function extractBullets(text){
-      // Grab only likely accomplishment lines
       return text.split(/\r?\n/)
         .map(l => l.trim())
         .filter(l => l && (
           /^[•\-\*\u2022]\s/.test(l) ||
-          /^(led|managed|developed|created|implemented|improved|increased|decreased|built|designed|launched|achieved|delivered|coordinated|established|executed|optimized|spearheaded|reduced|generated|drove|directed|oversaw|owned|produced|facilitated)\b/i.test(l)
+          /^(led|managed|developed|created|implemented|improved|increased|decreased|built|designed|launched|achieved|delivered|coordinated|established|executed|optimized|spearheaded|reduced|generated|drove|directed|oversaw|owned|produced|facilitated|organized|maintained|supported)\b/i.test(l)
         ));
     }
 
@@ -381,72 +435,118 @@
       return /(\+?\d{1,3}(,\d{3})*(\.\d+)?\s?(%|percent|pts|x|times|months?|years?|clients?|users?|employees?|students?|projects?)|\$[\d,]+|\b\d{3,}\b)/i.test(line);
     }
 
+    function detectEntities(text){
+      const titles = (text.match(/\b(Director|Manager|Coordinator|Consultant|Advisor|Lead|Analyst|Specialist|Producer)\b/gi) || []).length;
+      const dates  = (text.match(/\b(0?[1-9]|1[0-2])\/\d{4}\b|\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\b\.?\s?\d{4}/gi) || []).length;
+      const certs  = (text.match(/\b(PMP|CSM|PMI-ACP|Six Sigma|Scrum)\b/gi) || []).length;
+      const degrees = (text.match(/\b(Bachelor|Master|Associate|B\.?S\.?|M\.?S\.?)\b/gi) || []).length;
+      return { titles, dates, certs, degrees };
+    }
+
     function readability(text){
       const sentences = Math.max(1, (text.match(/[.!?]+/g) || []).length);
       const words = Math.max(1, (text.match(/\b[\w'-]+\b/g) || []).length);
-      // crude syllable proxy
       const syllables = (text.toLowerCase().match(/[aeiouy]/g) || []).length;
       const score = 206.835 - (1.015 * (words / sentences)) - (84.6 * (syllables / words));
       return Math.round(Math.max(0, Math.min(100, score)));
     }
 
-    function sectionPresence(text){
-      const t = text.toLowerCase();
-      return {
-        contact: /@|\d{3}[-\s]?\d{3}[-\s]?\d{4}/.test(t),
-        summary: /summary|objective|profile/.test(t),
-        experience: /experience|employment|work history|professional experience/.test(t),
-        education: /education|degree|university|college|bachelor|master/.test(t),
-        skills: /skills|competencies|proficiencies/.test(t),
-      };
+    function structuralPenalty(text){
+      let bad = 0;
+      if(/\|.+\|/.test(text)) bad++;        // looks like a table
+      if(/ {2,}\w+ {2,}\w+/.test(text)) bad++; // multi-column spacing
+      if(/header|footer/i.test(text)) bad++;
+      return Math.max(0, 100 - bad*20);
     }
 
     function performAnalysis(resume, jd){
-      const out = { scores:{}, issues:[], keywords:{matched:[], missing:[]}, bullets:{total:0, withMetrics:0, weak:[]}, matchedList:[], missingList:[] };
+      const out = { scores:{}, issues:[], keywords:{matched:[], missing:[]}, bullets:{total:0, withMetrics:0, weak:[]}, note:'' };
 
-      // Keywords
-      const jdTop = topKeywords(jd, 35);
-      const resumeTokens = tokenize(resume);
-      const { matched, missing, score: keywordScore } = weightedMatch(jdTop, resumeTokens);
-      out.keywords.matched = matched;
-      out.keywords.missing = missing.slice(0, 20);
-      out.scores.keywords = keywordScore;
+      // Sections & weighting
+      const sections = sectionize(resume);
+      const weights = { summary:0.2, skills:0.3, experience:0.4, education:0.1 };
 
-      // Bullets & metrics
-      const bullets = extractBullets(resume);
+      // JD terms (phrase-heavy)
+      const jdTop = topTerms(jd, 35);
+
+      // Resume tokens by section
+      const resumeTermsBySection = {};
+      for(const s in sections){ resumeTermsBySection[s] = new Set(topTerms(sections[s], 60)); }
+
+      // Weighted keyword score by section
+      let totalScore = 0;
+      let denom = 0;
+      const matchedSet = new Set();
+      const missingList = [];
+
+      jdTop.forEach(term=>{
+        let termHit = false;
+        for(const s in resumeTermsBySection){
+          if(resumeTermsBySection[s].has(term)){
+            totalScore += weights[s] || 0;
+            termHit = true;
+            matchedSet.add(term);
+          }
+        }
+        if(!termHit && !filler.has(term)) missingList.push(term);
+        denom += 1; // each term counts once
+      });
+
+      out.keywords.matched = Array.from(matchedSet);
+      out.keywords.missing = missingList.slice(0,20);
+      out.scores.keywords = denom ? Math.round((out.keywords.matched.length/denom)*100) : 0;
+
+      // Synonym coverage (boost if core concepts present)
+      const synHits = synonymHit(resume);
+      const synBoost = Object.values(synHits).filter(Boolean).length >= 6 ? 5 : (Object.values(synHits).filter(Boolean).length >= 3 ? 3 : 0);
+      out.scores.keywords = Math.min(100, out.scores.keywords + synBoost);
+
+      // Bullets & metrics (experience only emphasis)
+      const bullets = extractBullets(sections.experience || resume);
       const withMetrics = bullets.filter(hasMetric);
       out.bullets.total = bullets.length;
       out.bullets.withMetrics = withMetrics.length;
       out.bullets.weak = bullets.filter(b => !hasMetric(b)).slice(0, 6);
       const quantifiedScore = bullets.length ? Math.round((withMetrics.length / bullets.length) * 100) : 0;
       out.scores.quantified = quantifiedScore;
-
-      if (quantifiedScore < 70 && bullets.length >= 6){
+      if (quantifiedScore < 60 && bullets.length >= 6){
         out.issues.push(`Only ${quantifiedScore}% of bullets include metrics`);
       }
 
-      // Sections
-      const sp = sectionPresence(resume);
-      const presentCount = Object.values(sp).filter(Boolean).length;
-      out.scores.structure = Math.round((presentCount / 5) * 100);
-      Object.entries(sp).forEach(([k,v])=>{ if(!v) out.issues.push(`Missing ${k} section`); });
+      // Section presence score
+      const presence = {
+        summary: !!sections.summary.trim(),
+        skills: !!sections.skills.trim(),
+        experience: !!sections.experience.trim(),
+        education: !!sections.education.trim()
+      };
+      const presentCount = Object.values(presence).filter(Boolean).length;
+      out.scores.structure = Math.round((presentCount / 4) * 100);
 
-      // Readability
+      // Entities (confidence)
+      const ents = detectEntities(resume);
+      let entityScore = 60;
+      if(ents.titles) entityScore += 10;
+      if(ents.dates) entityScore += 10;
+      if(ents.certs) entityScore += 10;
+      if(ents.degrees) entityScore += 10;
+      entityScore = Math.min(100, entityScore);
+
+      // Readability & formatting
       out.scores.readability = readability(resume);
+      out.scores.format = structuralPenalty(resume);
 
-      // Formatting heuristic
-      out.scores.format = 100 - Math.max(0, (resume.length < 400 ? 20 : 0));
-
-      // Overall (ATS-ish weighting)
+      // Overall ATS-style weighting
       out.scores.overall = Math.round(
         (out.scores.keywords * 0.45) +
-        (out.scores.quantified * 0.25) +
-        (out.scores.structure * 0.15) +
+        (out.scores.quantified * 0.20) +
+        (out.scores.structure * 0.10) +
+        (entityScore * 0.10) +
         (out.scores.readability * 0.10) +
         (out.scores.format * 0.05)
       );
 
-      // Heuristic issue for missing terms if a lot missing
+      // High missing list? Flag once (ignoring filler)
       if (out.keywords.missing.length >= 10){
         out.issues.push(`Missing ${out.keywords.missing.length} key JD terms`);
       }
@@ -455,6 +555,9 @@
 
     function cls(score){
       return score >= 80 ? 'excellent' : score >= 60 ? 'good' : 'poor';
+    }
+    function escapeHtml(s){
+      return s.replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;' }[m]));
     }
 
     function renderResults(a){
@@ -482,7 +585,7 @@
         <div class="issues">
           <h3>Priority Issues (${a.issues.length})</h3>
           <div class="list">
-            <ul>${a.issues.map(i=>`<li>${i}</li>`).join('')}</ul>
+            <ul>${a.issues.map(i=>`<li>${escapeHtml(i)}</li>`).join('')}</ul>
           </div>
         </div>`:''}
 
@@ -491,13 +594,13 @@
             <div>
               <h3>Matched Keywords (${a.keywords.matched.length})</h3>
               <div class="chipbox">
-                ${a.keywords.matched.map(k=>`<span class="chip pos">${k}</span>`).join('') || '<span class="chip">None</span>'}
+                ${a.keywords.matched.map(k=>`<span class="chip pos">${escapeHtml(k)}</span>`).join('') || '<span class="chip">None</span>'}
               </div>
             </div>
             <div>
               <h3>Add These Keywords (${a.keywords.missing.length})</h3>
               <div class="chipbox">
-                ${a.keywords.missing.map(k=>`<span class="chip neg">${k}</span>`).join('') || '<span class="chip">None</span>'}
+                ${a.keywords.missing.map(k=>`<span class="chip neg">${escapeHtml(k)}</span>`).join('') || '<span class="chip">None</span>'}
               </div>
             </div>
           </div>
@@ -513,11 +616,9 @@
       `;
     }
 
-    function escapeHtml(s){
-      return s.replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;' }[m]));
-    }
-
-    // Build prompts & launchers
+    /* -------------------------
+       PROMPTS & LAUNCHERS
+    ------------------------- */
     function buildPrompts(a){
       const resumePrompt = `You are an expert ATS resume optimizer. Rewrite this resume to maximize ATS compatibility and mirror the job description.
 
@@ -535,35 +636,35 @@ SCORES:
 PRIORITY ISSUES:
 ${a.issues.map(i => `• ${i}`).join('\n')}
 
-MISSING KEYWORDS (use naturally):
+MISSING KEYWORDS (use naturally, avoid filler):
 ${a.keywords.missing.join(', ')}
 
 ADD METRICS TO THESE BULLETS:
 ${(a.bullets.weak || []).map(b => `• ${b}`).join('\n')}
 
 INSTRUCTIONS:
-1) Include all missing keywords naturally (no stuffing).
+1) Include missing keywords naturally (no stuffing).
 2) Convert weak bullets to quantified statements (%, $, #, time).
-3) Strong action verbs; concise, single-column, ATS-safe (no tables/columns).
+3) Strong action verbs; single-column, ATS-safe (no tables/columns).
 4) Use MM/YYYY dates; clear section headers (SUMMARY, EXPERIENCE, EDUCATION, SKILLS, CERTS).
 5) Output only the complete rewritten resume (no commentary).`;
 
-      const coverPrompt = `Create a compelling, professional cover letter tailored to this role.
+      const coverPrompt = `Create a concise, professional cover letter tailored to this role.
 
 JOB DESCRIPTION:
 ${jdEl.value}
 
-CANDIDATE BACKGROUND (summary & highlights):
-${resumeEl.value.slice(0, 1500)}
+CANDIDATE BACKGROUND (summary & notable outcomes):
+${resumeEl.value.slice(0, 1800)}
 
-REQUIRED STRUCTURE:
-1) Hook with authentic interest in the role and brand.
+STRUCTURE:
+1) Hook with authentic interest in the brand and role.
 2) Why I'm a fit: map skills to the JD (program ops, marketing, sponsors, internal/external comms).
 3) 2–3 quantified achievements (%, $, #).
-4) Call to action + reference resume.
+4) Close with a clear call to action and reference to resume.
 
 TONE & LENGTH:
-- Professional, confident, and concise; < 400 words.
+- Professional, confident, under 400 words.
 - End with: "I thank you immensely for your time and consideration."`;
 
       resumePromptEl.textContent = resumePrompt;
@@ -572,29 +673,35 @@ TONE & LENGTH:
       copyResumePromptBtn.onclick = ()=> copyText(resumePromptEl.textContent, copyResumePromptBtn);
       copyCoverPromptBtn.onclick = ()=> copyText(coverPromptEl.textContent, copyCoverPromptBtn);
 
-      openClaudeResumeBtn.onclick = ()=> openInClaude(resumePromptEl.textContent);
-      openChatGPTResumeBtn.onclick = ()=> openInChatGPT(resumePromptEl.textContent);
+      // Copy first, then open site. No prefill is possible reliably -> this guarantees user just pastes.
+      openClaudeResumeBtn.onclick = ()=> {
+        copyText(resumePromptEl.textContent);
+        window.open('https://claude.ai/new','_blank');
+      };
+      openChatGPTResumeBtn.onclick = ()=> {
+        copyText(resumePromptEl.textContent);
+        window.open('https://chat.openai.com/','_blank');
+      };
     }
 
+    function showToast(msg='Copied to clipboard'){
+      toastEl.textContent = msg;
+      toastEl.style.display = 'block';
+      setTimeout(()=> toastEl.style.display = 'none', 1500);
+    }
     function copyText(t, btn){
       navigator.clipboard.writeText(t).then(()=>{
-        const prev = btn.textContent; btn.textContent = 'Copied!';
-        setTimeout(()=>btn.textContent = prev, 1400);
+        if(btn){
+          const prev = btn.textContent; btn.textContent = 'Copied!';
+          setTimeout(()=>btn.textContent = prev, 1200);
+        }
+        showToast();
       });
     }
 
-    function openInClaude(prompt){
-      const url = `https://claude.ai/new?input=${encodeURIComponent(prompt)}`;
-      window.open(url, '_blank');
-    }
-    function openInChatGPT(prompt){
-      // note: URL params not officially supported; this opens ChatGPT and user pastes
-      const url = `https://chat.openai.com/?model=gpt-4o`;
-      window.open(url, '_blank');
-      setTimeout(()=>navigator.clipboard.writeText(prompt), 250);
-    }
-
-    // Export PDF
+    /* -------------------------
+       EXPORT & CLEAR
+    ------------------------- */
     document.getElementById('exportBtn').addEventListener('click', ()=>{
       const report = document.createElement('div');
       report.innerHTML = `
@@ -608,13 +715,14 @@ TONE & LENGTH:
           <li>Bullets with Metrics: ${analysis?.scores.quantified ?? '-'}%</li>
           <li>Structure: ${analysis?.scores.structure ?? '-' }%</li>
           <li>Readability: ${analysis?.scores.readability ?? '-' }%</li>
+          <li>Formatting: ${analysis?.scores.format ?? '-' }%</li>
         </ul>
         <h3>Matched Keywords (${analysis?.keywords.matched.length || 0})</h3>
-        <p>${(analysis?.keywords.matched || []).join(', ')}</p>
+        <p style="font-size:12px">${(analysis?.keywords.matched || []).join(', ')}</p>
         <h3>Missing Keywords (${analysis?.keywords.missing.length || 0})</h3>
-        <p>${(analysis?.keywords.missing || []).join(', ')}</p>
-        <h3>Weak Bullets</h3>
-        <ul>${(analysis?.bullets.weak || []).map(b=>`<li>${escapeHtml(b)}</li>`).join('')}</ul>
+        <p style="font-size:12px">${(analysis?.keywords.missing || []).join(', ')}</p>
+        <h3>Bullets Needing Metrics</h3>
+        <ul style="font-size:12px">${(analysis?.bullets.weak || []).map(b=>`<li>${escapeHtml(b)}</li>`).join('')}</ul>
       `;
       html2pdf().from(report).set({
         margin: 10,
@@ -625,7 +733,6 @@ TONE & LENGTH:
       }).save();
     });
 
-    // Clear
     document.getElementById('clearBtn').addEventListener('click', ()=>{
       if(!confirm('Clear text and results?')) return;
       resumeEl.value = '';
@@ -636,7 +743,13 @@ TONE & LENGTH:
       analysis = null; enableAnalyze();
       localStorage.removeItem('resumeText'); localStorage.removeItem('jdText');
     });
+  </script>
 
+  <!-- Optional: Lazy parsers loaded dynamically when needed -->
+  <script>
+    // placeholders; actual libs are pulled on demand in ensurePdfJs/ensureMammoth
+    window.pdfjsLib = window.pdfjsLib || undefined;
+    window.mammoth = window.mammoth || undefined;
   </script>
 </body>
 </html>
