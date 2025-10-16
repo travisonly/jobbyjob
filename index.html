@@ -583,29 +583,96 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
             return result;
         }
 
-        function extractKeywords(text) {
+function extractKeywords(text) {
+            // Much more aggressive stopword list
             const stopWords = new Set([
-                'the', 'and', 'for', 'with', 'from', 'have', 'this', 'that', 'will', 'been', 
+                // Common words
+                'the', 'and', 'for', 'with', 'from', 'have', 'this', 'that', 'will', 'been',
                 'your', 'their', 'into', 'about', 'would', 'there', 'could', 'should', 'other',
                 'which', 'when', 'where', 'they', 'what', 'than', 'then', 'these', 'those',
                 'some', 'such', 'only', 'also', 'more', 'very', 'must', 'well', 'back', 'through',
-                'year', 'years', 'work', 'including', 'within', 'across', 'being'
+                
+                // Business jargon (meaningless)
+                'ability', 'business', 'company', 'confidence', 'environment', 'help', 'information',
+                'join', 'manage', 'opportunity', 'position', 'process', 'provide', 'range', 'role',
+                'services', 'skills', 'success', 'support', 'time', 'work', 'world', 'years',
+                'including', 'within', 'across', 'being', 'based', 'related', 'various', 'multiple',
+                'strong', 'excellent', 'good', 'great', 'high', 'team', 'working', 'experience',
+                'responsibilities', 'requirements', 'looking', 'seeking', 'candidates', 'ideal',
+                
+                // Connector words
+                'while', 'during', 'ensure', 'make', 'take', 'give', 'include', 'develop', 'create',
+                'build', 'maintain', 'improve', 'enhance', 'identify', 'understand', 'learn'
             ]);
 
-            const words = text.toLowerCase()
+            // Extract meaningful phrases (2-3 words) first - these are usually better keywords
+            const phrases = [];
+            const words = text.split(/\s+/);
+            
+            for (let i = 0; i < words.length - 1; i++) {
+                const twoWord = `${words[i]} ${words[i+1]}`.toLowerCase().replace(/[^\w\s]/g, '');
+                const threeWord = i < words.length - 2 ? 
+                    `${words[i]} ${words[i+1]} ${words[i+2]}`.toLowerCase().replace(/[^\w\s]/g, '') : '';
+                
+                // Only keep phrases that look like real terms
+                if (twoWord.length > 8 && !stopWords.has(twoWord)) {
+                    phrases.push(twoWord);
+                }
+                if (threeWord.length > 12 && !stopWords.has(threeWord)) {
+                    phrases.push(threeWord);
+                }
+            }
+
+            // Single words (filtered heavily)
+            const singleWords = text.toLowerCase()
                 .replace(/[^\w\s]/g, ' ')
                 .split(/\s+/)
-                .filter(w => w.length > 3 && !stopWords.has(w));
+                .filter(w => {
+                    // Must be at least 4 chars
+                    if (w.length < 4) return false;
+                    
+                    // Can't be a stopword
+                    if (stopWords.has(w)) return false;
+                    
+                    // Must have at least one capital letter in original OR be a likely acronym
+                    const wordInOriginal = text.match(new RegExp('\\b' + w + '\\b', 'i'));
+                    if (wordInOriginal && wordInOriginal[0]) {
+                        const originalForm = wordInOriginal[0];
+                        // Keep if it has capitals (likely a proper noun/tool/tech)
+                        if (/[A-Z]/.test(originalForm) && originalForm !== originalForm.toUpperCase()) return true;
+                        // Keep if it's an acronym (all caps, 2-6 chars)
+                        if (originalForm === originalForm.toUpperCase() && originalForm.length >= 2 && originalForm.length <= 6) return true;
+                    }
+                    
+                    // Keep technical-looking words (has numbers or special patterns)
+                    if (/\d/.test(w)) return true;
+                    
+                    // Keep if it looks like a tool/tech term (camelCase, has common tech suffixes)
+                    if (/[A-Z]/.test(w) || /ware|soft|tech|system|ology|base|script|cloud|data/i.test(w)) return true;
+                    
+                    return false;
+                });
 
+            // Combine phrases and words
+            const allKeywords = [...phrases, ...singleWords];
+            
+            // Count frequency
             const freq = {};
-            words.forEach(w => {
-                freq[w] = (freq[w] || 0) + 1;
+            allKeywords.forEach(kw => {
+                freq[kw] = (freq[kw] || 0) + 1;
             });
 
-            // Return top keywords
+            // Return top keywords, prioritizing phrases over single words
             return Object.entries(freq)
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 50);
+                .sort((a, b) => {
+                    // Prefer longer phrases
+                    const aWords = a[0].split(' ').length;
+                    const bWords = b[0].split(' ').length;
+                    if (aWords !== bWords) return bWords - aWords;
+                    // Then by frequency
+                    return b[1] - a[1];
+                })
+                .slice(0, 30);
         }
 
         function displayResults() {
