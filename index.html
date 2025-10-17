@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Jobbyjob Lite+ — ATS Analyzer & Prompt Launcher (Local-Only)</title>
+  <title>Jobbyjob Lite+ — ATS Analyzer & Prompt Launcher (Local + Semantic)</title>
 
-  <!-- Export to PDF (client-side) -->
+  <!-- Export to PDF (client-side only) -->
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
   <style>
@@ -39,7 +39,6 @@
     @media (max-width: 900px){.row{grid-template-columns:1fr}}
     .card{
       background:var(--card);
-      border:1px solid --border;
       border:1px solid var(--border);
       border-radius:16px;
       padding:16px;
@@ -115,7 +114,7 @@
     <header>
       <div>
         <h1>Jobbyjob Lite+</h1>
-        <div class="sub">ATS resume analysis, keyword gap, and AI prompt launcher — client-side, free.</div>
+        <div class="sub">ATS resume analysis, keyword gap, and AI prompt launcher — client-side, free. (Semantic on by default)</div>
       </div>
       <div class="topbar">
         <label class="switch">
@@ -176,8 +175,6 @@
         <div class="split">
           <button class="btn secondary" id="copyResumePrompt">Copy Resume Prompt</button>
           <button class="btn secondary" id="copyCoverPrompt">Copy Cover Prompt</button>
-          <button class="btn warn" id="openClaudeResume">Copy & Open Claude</button>
-          <button class="btn warn" id="openChatGPTResume">Copy & Open ChatGPT</button>
         </div>
       </div>
       <div class="grid2">
@@ -192,7 +189,7 @@
       </div>
     </div>
 
-    <footer>Local-only. No servers, no tracking. Built to be fast & useful.</footer>
+    <footer>Local + semantic (Hugging Face MiniLM). No sign-ups, no keys, no tracking.</footer>
   </div>
 
   <div id="toast" class="toast">Copied to clipboard</div>
@@ -218,8 +215,6 @@
     const coverPromptEl = document.getElementById('coverPrompt');
     const copyResumePromptBtn = document.getElementById('copyResumePrompt');
     const copyCoverPromptBtn = document.getElementById('copyCoverPrompt');
-    const openClaudeResumeBtn = document.getElementById('openClaudeResume');
-    const openChatGPTResumeBtn = document.getElementById('openChatGPTResume');
     const toastEl = document.getElementById('toast');
 
     /* -------------------------
@@ -332,21 +327,78 @@
     }
 
     /* -------------------------
+       SEMANTIC SIMILARITY (Hugging Face public endpoint)
+       No key required; graceful fallback on failure.
+    ------------------------- */
+    async function getSemanticSimilarity(textA, textB){
+      // Short-circuit for tiny inputs
+      if(!textA || !textB || textA.length < 200 || textB.length < 200) return 0;
+
+      const payload = {
+        inputs: {
+          source_sentence: textA.slice(0, 20000),
+          sentences: [textB.slice(0, 20000)]
+        }
+      };
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4500); // 4.5s safety timeout
+
+      try{
+        const res = await fetch(
+          "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2",
+          {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify(payload),
+            signal: controller.signal
+          }
+        );
+        clearTimeout(timeout);
+        const data = await res.json();
+        // Expected: [similarityScoreFloat]
+        if(Array.isArray(data) && typeof data[0] === "number"){
+          return Math.round(Math.max(0, Math.min(100, data[0] * 100)));
+        }
+        // HF may warm the model; try again once quickly if it returns object
+        if(data && data.error && /loading|please try again/i.test(data.error)){
+          await new Promise(r => setTimeout(r, 800));
+          return getSemanticSimilarity(textA, textB);
+        }
+        return 0;
+      }catch(e){
+        // Abort or network error -> fallback to 0
+        return 0;
+      }
+    }
+
+    /* -------------------------
        ANALYSIS (ATS-style)
     ------------------------- */
     analyzeBtn.addEventListener('click', analyze);
     reanalyzeBtn.addEventListener('click', analyze);
 
-    function analyze(){
+    async function analyze(){
       setProgress(12);
-      setTimeout(()=>{
-        analysis = performAnalysis(resumeEl.value, jdEl.value);
-        renderResults(analysis);
-        buildPrompts(analysis);
-        promptsCard.style.display = 'block';
-        setProgress(0);
-        enableAnalyze();
-      }, 60);
+      // Run local analysis first (fast), then semantic (slow, optional)
+      analysis = performAnalysisLocal(resumeEl.value, jdEl.value);
+      renderResults(analysis);
+      buildPrompts(analysis);
+      promptsCard.style.display = 'block';
+      setProgress(55);
+
+      // Blend in semantic score (if available) to make overall smarter
+      const sem = await getSemanticSimilarity(resumeEl.value, jdEl.value); // 0-100
+      if(sem > 0){
+        // Recalculate overall: 75% local, 25% semantic
+        analysis.scores.semantic = sem;
+        analysis.scores.overall = Math.round(analysis.scores.overall * 0.75 + sem * 0.25);
+        renderResults(analysis); // update UI
+      }else{
+        analysis.scores.semantic = 0;
+      }
+      setProgress(0);
+      enableAnalyze();
     }
 
     // Stopwords & filler ignored for keyword gap
@@ -355,10 +407,10 @@
 
     // Lightweight synonyms map (counts if any variant appears)
     const synonyms = {
-      "program": ["program","programs","programs","programmatic","initiative","initiatives"],
+      "program": ["program","programs","programmatic","initiative","initiatives"],
       "project": ["project","projects","pm","pmp","scrum","agile"],
       "marketing": ["marketing","brand","promotion","go-to-market","campaign","communications"],
-      "communications": ["communications","comms","internal communications","external communications","PR","public relations"],
+      "communications": ["communications","comms","internal communications","external communications","pr","public relations"],
       "entrepreneurship": ["entrepreneurship","entrepreneurs","founders","startups"],
       "event": ["event","events","gala","conference","festival","logistics","cvent"],
       "invoice": ["invoice","invoicing","billing","ap","accounts payable","receivables"],
@@ -389,7 +441,6 @@
       const freq = {};
       grams.forEach(t => {
         if (t.length < 4) return;
-        // skip filler-only grams
         const parts = t.split(' ');
         if (parts.every(p => filler.has(p))) return;
         freq[t] = (freq[t]||0)+1;
@@ -459,7 +510,7 @@
       return Math.max(0, 100 - bad*20);
     }
 
-    function performAnalysis(resume, jd){
+    function performAnalysisLocal(resume, jd){
       const out = { scores:{}, issues:[], keywords:{matched:[], missing:[]}, bullets:{total:0, withMetrics:0, weak:[]}, note:'' };
 
       // Sections & weighting
@@ -474,7 +525,6 @@
       for(const s in sections){ resumeTermsBySection[s] = new Set(topTerms(sections[s], 60)); }
 
       // Weighted keyword score by section
-      let totalScore = 0;
       let denom = 0;
       const matchedSet = new Set();
       const missingList = [];
@@ -483,13 +533,13 @@
         let termHit = false;
         for(const s in resumeTermsBySection){
           if(resumeTermsBySection[s].has(term)){
-            totalScore += weights[s] || 0;
+            // count once if found anywhere (score normalized later)
             termHit = true;
             matchedSet.add(term);
           }
         }
         if(!termHit && !filler.has(term)) missingList.push(term);
-        denom += 1; // each term counts once
+        denom += 1;
       });
 
       out.keywords.matched = Array.from(matchedSet);
@@ -536,7 +586,7 @@
       out.scores.readability = readability(resume);
       out.scores.format = structuralPenalty(resume);
 
-      // Overall ATS-style weighting
+      // Overall ATS-style weighting (local-only first)
       out.scores.overall = Math.round(
         (out.scores.keywords * 0.45) +
         (out.scores.quantified * 0.20) +
@@ -581,6 +631,14 @@
           </div>
         </div>
 
+        ${typeof a.scores.semantic === 'number' ? `
+          <div class="scores" style="margin-top:0">
+            <div class="score">
+              <div class="n ${cls(a.scores.semantic)}">${a.scores.semantic}%</div>
+              <div class="label">Semantic Match (HF)</div>
+            </div>
+          </div>` : ''}
+
         ${a.issues.length ? `
         <div class="issues">
           <h3>Priority Issues (${a.issues.length})</h3>
@@ -617,7 +675,7 @@
     }
 
     /* -------------------------
-       PROMPTS & LAUNCHERS
+       PROMPTS & CLIPBOARD
     ------------------------- */
     function buildPrompts(a){
       const resumePrompt = `You are an expert ATS resume optimizer. Rewrite this resume to maximize ATS compatibility and mirror the job description.
@@ -632,6 +690,7 @@ SCORES:
 - Overall: ${a.scores.overall}/100
 - Keyword Match: ${a.scores.keywords}%
 - Bullets with metrics: ${a.scores.quantified}%
+${typeof a.scores.semantic === 'number' ? `- Semantic Match: ${a.scores.semantic}%` : ''}
 
 PRIORITY ISSUES:
 ${a.issues.map(i => `• ${i}`).join('\n')}
@@ -672,16 +731,6 @@ TONE & LENGTH:
 
       copyResumePromptBtn.onclick = ()=> copyText(resumePromptEl.textContent, copyResumePromptBtn);
       copyCoverPromptBtn.onclick = ()=> copyText(coverPromptEl.textContent, copyCoverPromptBtn);
-
-      // Copy first, then open site. No prefill is possible reliably -> this guarantees user just pastes.
-      openClaudeResumeBtn.onclick = ()=> {
-        copyText(resumePromptEl.textContent);
-        window.open('https://claude.ai/new','_blank');
-      };
-      openChatGPTResumeBtn.onclick = ()=> {
-        copyText(resumePromptEl.textContent);
-        window.open('https://chat.openai.com/','_blank');
-      };
     }
 
     function showToast(msg='Copied to clipboard'){
@@ -703,6 +752,10 @@ TONE & LENGTH:
        EXPORT & CLEAR
     ------------------------- */
     document.getElementById('exportBtn').addEventListener('click', ()=>{
+      if(!analysis){
+        alert('Run an analysis first.');
+        return;
+      }
       const report = document.createElement('div');
       report.innerHTML = `
         <h2 style="font-family:system-ui;margin:0 0 8px 0">Jobbyjob Lite+ Report</h2>
@@ -716,6 +769,7 @@ TONE & LENGTH:
           <li>Structure: ${analysis?.scores.structure ?? '-' }%</li>
           <li>Readability: ${analysis?.scores.readability ?? '-' }%</li>
           <li>Formatting: ${analysis?.scores.format ?? '-' }%</li>
+          ${typeof analysis?.scores.semantic === 'number' ? `<li>Semantic Match (HF): ${analysis.scores.semantic}%</li>` : ''}
         </ul>
         <h3>Matched Keywords (${analysis?.keywords.matched.length || 0})</h3>
         <p style="font-size:12px">${(analysis?.keywords.matched || []).join(', ')}</p>
